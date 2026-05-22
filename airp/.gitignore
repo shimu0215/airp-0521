@@ -1,0 +1,9 @@
+data/
+processed/
+processed-real/
+saved_model/
+log/
+__pycache__/
+*.pt
+*.pth
+torchmd-net/

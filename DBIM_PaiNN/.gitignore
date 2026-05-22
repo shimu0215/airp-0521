@@ -1,0 +1,9 @@
+__pycache__/
+PaiNN/__pycache__/
+saved_model/
+DBIM_log/
+result/
+plots/
+*.pt
+*.pth
+DBIM_argument.py
