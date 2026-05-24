@@ -139,6 +139,8 @@ def pack_rd_directory(input_dir, output_dir, pattern="qm9star_*_chunk*_processed
         file_meta = _pack_single_file(input_path, output_path)
         index["files"].append(file_meta)
 
+    index["global_max_atom_id"] = max(item["max_atom_id"] for item in index["files"])
+    index["global_max_atom_number"] = max(item["max_atom_number"] for item in index["files"])
     index["total_molecules"] = sum(item["num_molecules"] for item in index["files"])
     index_path = os.path.join(output_dir, PACKED_RD_INDEX)
     with open(index_path, "w", encoding="utf-8") as f:
@@ -163,6 +165,18 @@ class PackedRDChunkDataset(Dataset):
             raise ValueError(f"Unsupported packed RD format: {self.index.get('format')}")
 
         self.files = self.index["files"]
+        self.global_max_atom_id = int(
+            self.index.get(
+                "global_max_atom_id",
+                max(item["max_atom_id"] for item in self.files),
+            )
+        )
+        self.global_max_atom_number = int(
+            self.index.get(
+                "global_max_atom_number",
+                max(item["max_atom_number"] for item in self.files),
+            )
+        )
         self.cumulative_sizes = []
         running_total = 0
         for item in self.files:
@@ -200,8 +214,8 @@ class PackedRDChunkDataset(Dataset):
         start = int(offsets[local_idx].item())
         end = int(offsets[local_idx + 1].item())
         natoms = int(chunk["natoms"][local_idx].item())
-        max_atom_number = int(chunk["max_atom_number"])
-        max_atom_id = int(chunk["max_atom_id"])
+        max_atom_number = self.global_max_atom_number
+        max_atom_id = self.global_max_atom_id
 
         pos = self._make_padded_tensor(chunk["pos"][start:end], natoms, max_atom_number, (3,))
         rdkit_pos = self._make_padded_tensor(chunk["rdkit_pos"][start:end], natoms, max_atom_number, (3,))
