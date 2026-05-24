@@ -4,13 +4,78 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import torch
+from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 
 from DBIM_read_data import read_dataset, split_dataset
 from DBIM_models import DBIMGenerativeModel
 from DBIM_argument import parse_opt
+from packed_rd import PACKED_RD_INDEX, PackedRDChunkDataset
+
+
+def _split_cache_path(path, train_ratio, val_ratio, seed):
+    filename = f"split_indices_t{train_ratio:.4f}_v{val_ratio:.4f}_s{seed}.pt"
+    return os.path.join(path, filename)
+
+
+def _load_or_create_split_indices(path, dataset_size, train_ratio, val_ratio, seed=42):
+    cache_path = _split_cache_path(path, train_ratio, val_ratio, seed)
+    if os.path.exists(cache_path):
+        saved = torch.load(cache_path, map_location="cpu")
+        if saved.get("dataset_size") == dataset_size:
+            return saved["train"], saved["val"], saved["test"]
+
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(dataset_size)
+
+    train_end = int(dataset_size * train_ratio)
+    val_size = int(dataset_size * val_ratio)
+    val_end = train_end + val_size
+
+    train_idx = indices[:train_end].tolist()
+    val_idx = indices[train_end:val_end].tolist()
+    test_idx = indices[val_end:].tolist()
+
+    torch.save(
+        {
+            "dataset_size": dataset_size,
+            "train_ratio": train_ratio,
+            "val_ratio": val_ratio,
+            "seed": seed,
+            "train": train_idx,
+            "val": val_idx,
+            "test": test_idx,
+        },
+        cache_path,
+    )
+    return train_idx, val_idx, test_idx
+
+
+def _build_loaders_from_packed(path, args):
+    dataset = PackedRDChunkDataset(
+        path,
+        cache_size=getattr(args, "packed_cache_size", 2),
+    )
+    seed = getattr(args, "split_seed", 42)
+    train_idx, val_idx, test_idx = _load_or_create_split_indices(
+        path,
+        len(dataset),
+        args.train_ratio,
+        args.val_ratio,
+        seed=seed,
+    )
+
+    batch_size = args.batch_size
+    train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size)
+    test_loader = DataLoader(Subset(dataset, test_idx), batch_size=batch_size)
+    return train_loader, val_loader, test_loader
 
 def read_list(path, args, ext=None):
+    packed_index_path = os.path.join(path, PACKED_RD_INDEX)
+    if os.path.exists(packed_index_path):
+        return _build_loaders_from_packed(path, args)
+
     if ext is None:
         file_list = glob.glob(os.path.join(path, "qm9star_*_chunk*_processed.pt"))
     else:
